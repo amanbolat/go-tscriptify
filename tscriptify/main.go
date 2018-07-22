@@ -21,11 +21,12 @@ import (
 	"fmt"
 
 	"{{ .ModelsPackage }}"
-	"github.com/tkrajina/typescriptify-golang-structs/typescriptify"
+	"github.com/amanbolat/go-tscriptify/typescriptify"
 )
 
 func main() {
 	t := typescriptify.New()
+	t.UseInterface = {{ .UseInterface }}
 {{ range .Structs }}	t.Add({{ . }}{})
 {{ end }}
 	err := t.ConvertToFile("{{ .TargetFile }}")
@@ -39,13 +40,16 @@ type Params struct {
 	ModelsPackage string
 	TargetFile    string
 	Structs       []string
+	UseInterface bool
 }
 
 func main() {
 	var packagePath, target, stringExtension string
+	var useInterface bool
 	flag.StringVar(&packagePath, "package", "", "Path of the package with models")
 	flag.StringVar(&target, "target", "", "Target typescript file")
 	flag.StringVar(&stringExtension, "extension", "", "")
+	flag.BoolVar(&useInterface, "interface", true, "use interface instead of class")
 	flag.Parse()
 
 	structs := []string{}
@@ -95,7 +99,7 @@ func main() {
 		}
 	}
 
-	params := Params{Structs: structsArr, ModelsPackage: packagePath, TargetFile: target}
+	params := Params{Structs: structsArr, ModelsPackage: packagePath, TargetFile: target, UseInterface: useInterface}
 	err = t.Execute(f, params)
 	handleErr(err)
 
