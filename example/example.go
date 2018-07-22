@@ -1,6 +1,9 @@
 package main
 
-import "github.com/amanbolat/go-tscriptify/typescriptify"
+import (
+	"github.com/amanbolat/go-tscriptify/typescriptify"
+	"bitbucket.org/amanbolat/caconsole/shipment/model"
+)
 
 type Address struct {
 	// Used in html
@@ -19,12 +22,14 @@ type Person struct {
 	PersonalInfo PersonalInfo `json:"personal_info"`
 	Nicknames    []string     `json:"nicknames"`
 	Addresses    []Address    `json:"addresses"`
+	Shipments []*model.Shipment `json:"shipments"`
 }
 
 func main() {
 	converter := typescriptify.New()
 	converter.CreateFromMethod = true
 	converter.Indent = "    "
+	converter.UseInterface = true
 
 	converter.Add(Person{})
 

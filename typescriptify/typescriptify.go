@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 	"time"
+	"regexp"
+	"github.com/guregu/null"
 )
 
 type TypeScriptify struct {
@@ -17,10 +19,11 @@ type TypeScriptify struct {
 	CreateFromMethod bool
 	DoExportClass    bool
 	BackupExtension  string // If empty no backup
+	UseInterface     bool
 
 	golangTypes []reflect.Type
 	types       map[reflect.Kind]string
-	dateTypes	[]reflect.Type
+	dateTypes   []reflect.Type
 
 	// throwaway, used when converting
 	alreadyConverted map[reflect.Type]bool
@@ -52,10 +55,14 @@ func New() *TypeScriptify {
 	types[reflect.Interface] = "any"
 
 	result.types = types
-	result.dateTypes = []reflect.Type{reflect.TypeOf(time.Now())}
+	result.dateTypes = []reflect.Type{
+		reflect.TypeOf(time.Now()),
+		reflect.TypeOf(null.NewTime(time.Now(), true)),
+	}
 
 	result.Indent = "    "
 	result.CreateFromMethod = true
+	result.DoExportClass = true
 
 	return result
 }
@@ -208,9 +215,11 @@ func (t TypeScriptify) ConvertToFile(fileName string) error {
 }
 
 func (t *TypeScriptify) convertType(typeOf reflect.Type, customCode map[string]string) (string, error) {
-	//fmt.Printf("Converting type: %s\n", typeOf)
 	for _, v := range t.dateTypes {
-		if v == typeOf {
+		//fmt.Printf("Time is equal: %v\n", reflect.TypeOf(time.Now()) == reflect.TypeOf(null.Time{}))
+		//fmt.Printf("Type is %s\n", typeOf)
+		if v.String() == typeOf.String() {
+			//fmt.Printf("Found Time: %s %s\n", typeOf, v)
 			return "", nil
 		}
 	}
@@ -221,7 +230,21 @@ func (t *TypeScriptify) convertType(typeOf reflect.Type, customCode map[string]s
 	t.alreadyConverted[typeOf] = true
 
 	entityName := fmt.Sprintf("%s%s%s", t.Prefix, t.Suffix, typeOf.Name())
-	result := fmt.Sprintf("class %s {\n", entityName)
+
+	// Set type of typescript kind
+	// class, interface, enum
+	typeKind := "class"
+	if t.UseInterface {
+		typeKind = "interface"
+	}
+
+	stringer := reflect.TypeOf((*fmt.Stringer)(nil)).Elem()
+
+	if typeOf.Kind() == reflect.Int && typeOf.Implements(stringer) {
+		typeKind = "enum"
+	}
+
+	result := fmt.Sprintf("%s %s {\n", typeKind, entityName)
 	if t.DoExportClass {
 		result = "export " + result
 	}
@@ -285,7 +308,7 @@ func (t *TypeScriptify) convertType(typeOf reflect.Type, customCode map[string]s
 				}
 
 				for _, v := range t.dateTypes {
-					if v != fieldType {
+					if v.String() != fieldType.String() {
 						continue
 					}
 
@@ -311,8 +334,20 @@ func (t *TypeScriptify) convertType(typeOf reflect.Type, customCode map[string]s
 				default:
 					err = builder.AddSimpleArrayField(jsonFieldName, elemType.Name(), elemType.Kind())
 				}
+			case reflect.Int:
+				// If it is custom type of int, then it could be enum
+				if fieldType.Name() != fieldType.Kind().String() {
+					tsChunk, err := t.convertType(fieldType, customCode)
+					if err != nil {
+						return "", err
+					}
+					result = tsChunk + "\n" + result
+					builder.AddStructField(jsonFieldName, fieldType.Name())
+				} else {
+					err = builder.AddSimpleField(jsonFieldName, fieldType.Name(), fieldType.Kind())
+				}
 			default:
-				err = builder.AddSimpleField(jsonFieldName, field.Type.Name(), field.Type.Kind())
+				err = builder.AddSimpleField(jsonFieldName, fieldType.Name(), fieldType.Kind())
 			}
 
 			if err != nil {
@@ -322,7 +357,7 @@ func (t *TypeScriptify) convertType(typeOf reflect.Type, customCode map[string]s
 	}
 
 	result += builder.fields
-	if t.CreateFromMethod {
+	if t.CreateFromMethod && !t.UseInterface {
 		result += fmt.Sprintf("\n%sstatic createFrom(source: any) {\n", t.Indent)
 		result += fmt.Sprintf("%s%slet result = new %s();\n", t.Indent, t.Indent, entityName)
 		result += builder.createFromMethodBody
@@ -330,10 +365,33 @@ func (t *TypeScriptify) convertType(typeOf reflect.Type, customCode map[string]s
 		result += fmt.Sprintf("%s}\n\n", t.Indent)
 	}
 
+	// Set all enum values
+	if typeKind == "enum" {
+		val := reflect.New(typeOf).Elem()
+		for i := 0; i < 10000; i++ {
+			val.SetInt(int64(i))
+			arr := val.MethodByName("String").Call(nil)
+			if len(arr) == 1 {
+				enumVal := fmt.Sprintf("%+v", arr[0])
+
+				if strings.Contains(enumVal, fmt.Sprintf("(%d)", i)) {
+					continue
+				}
+				result += fmt.Sprintf("%s%s = '%s',\n", t.Indent, ToCamel(enumVal), enumVal)
+			}
+		}
+	}
+
 	if customCode != nil {
 		code := customCode[entityName]
 		result += t.Indent + "//[" + entityName + ":]\n" + code + "\n\n" + t.Indent + "//[end]\n"
 	}
+
+	// Type is enum
+	// Loop through all possible values
+	//if typeKind == "enum" {
+	//
+	//}
 
 	result += "}"
 
@@ -377,4 +435,47 @@ func (t *typeScriptClassBuilder) AddStructField(fieldName, fieldType string) {
 func (t *typeScriptClassBuilder) AddArrayOfStructsField(fieldName, fieldType string) {
 	t.fields += fmt.Sprintf("%s%s: %s[];\n", t.indent, fieldName, fieldType)
 	t.createFromMethodBody += fmt.Sprintf("%s%sresult.%s = source[\"%s\"] ? source[\"%s\"].map(function(element) { return %s.createFrom(element); }) : null;\n", t.indent, t.indent, fieldName, fieldName, fieldName, fieldType)
+}
+
+
+// Helpers for camel case
+var numberSequence = regexp.MustCompile(`([a-zA-Z])(\d+)([a-zA-Z]?)`)
+var numberReplacement = []byte(`$1 $2 $3`)
+
+func addWordBoundariesToNumbers(s string) string {
+	b := []byte(s)
+	b = numberSequence.ReplaceAll(b, numberReplacement)
+	return string(b)
+}
+
+func toCamelInitCase(s string, initCase bool) string {
+	s = addWordBoundariesToNumbers(s)
+	s = strings.Trim(s, " ")
+	n := ""
+	capNext := initCase
+	for _, v := range s {
+		if v >= 'A' && v <= 'Z' {
+			n += string(v)
+		}
+		if v >= '0' && v <= '9' {
+			n += string(v)
+		}
+		if v >= 'a' && v <= 'z' {
+			if capNext {
+				n += strings.ToUpper(string(v))
+			} else {
+				n += string(v)
+			}
+		}
+		if v == '_' || v == ' ' || v == '-' {
+			capNext = true
+		} else {
+			capNext = false
+		}
+	}
+	return n
+}
+
+func ToCamel(s string) string {
+	return toCamelInitCase(s, true)
 }

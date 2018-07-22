@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"bitbucket.org/amanbolat/caconsole/shipment/model"
 )
 
 type Address struct {
@@ -170,4 +171,9 @@ func testConverter(t *testing.T, converter *TypeScriptify, desiredResult string)
 			}
 		}
 	}
+}
+
+func TestEnum(t *testing.T) {
+	typeOf := reflect.TypeOf((*model.PaymentMethod)(nil))
+	t.Logf("%+v", typeOf.Elem().Name())
 }
