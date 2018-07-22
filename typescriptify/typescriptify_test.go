@@ -19,6 +19,7 @@ type Address struct {
 
 type Dummy struct {
 	Something string `json:"something"`
+	SomeInterface interface{} `json:"some_interface"`
 }
 
 type HasName struct {
@@ -37,10 +38,11 @@ func TestTypescriptifyWithTypes(t *testing.T) {
 
 	converter.AddType(reflect.TypeOf(Person{}))
 	converter.CreateFromMethod = false
-	converter.BackupDir = ""
+	converter.DoExportClass = true
 
 	desiredResult := `export class Dummy {
         something: string;
+		some_interface: any;
 }
 export class Address {
         duration: number;
@@ -61,11 +63,10 @@ func TestTypescriptifyWithInstances(t *testing.T) {
 	converter.Add(Person{})
 	converter.Add(Dummy{})
 	converter.CreateFromMethod = false
-	converter.DontExport = true
-	converter.BackupDir = ""
 
 	desiredResult := `class Dummy {
         something: string;
+		some_interface: any;
 }
 class Address {
         duration: number;
@@ -86,10 +87,11 @@ func TestTypescriptifyWithDoubleClasses(t *testing.T) {
 	converter.AddType(reflect.TypeOf(Person{}))
 	converter.AddType(reflect.TypeOf(Person{}))
 	converter.CreateFromMethod = false
-	converter.BackupDir = ""
+	converter.DoExportClass = true
 
 	desiredResult := `export class Dummy {
         something: string;
+		some_interface: any;
 }
 export class Address {
         duration: number;
@@ -112,8 +114,6 @@ func TestWithPrefixes(t *testing.T) {
 	converter.Add(Address{})
 	converter.Add(Dummy{})
 	converter.CreateFromMethod = false
-	converter.DontExport = true
-	converter.BackupDir = ""
 
 	desiredResult := `class test_Address {
         duration: number;
@@ -121,6 +121,7 @@ func TestWithPrefixes(t *testing.T) {
 }
 class test_Dummy {
         something: string;
+		some_interface: any;
 }`
 	testConverter(t, converter, desiredResult)
 }

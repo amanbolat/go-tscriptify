@@ -5,19 +5,20 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"path"
 	"reflect"
 	"strings"
 	"time"
 )
+
+var dateType = reflect.TypeOf(time.Now())
 
 type TypeScriptify struct {
 	Prefix           string
 	Suffix           string
 	Indent           string
 	CreateFromMethod bool
-	BackupDir        string // If empty no backup
-	DontExport       bool
+	DoExportClass    bool
+	BackupExtension  string // If empty no backup
 
 	golangTypes []reflect.Type
 	types       map[reflect.Kind]string
@@ -29,7 +30,7 @@ type TypeScriptify struct {
 func New() *TypeScriptify {
 	result := new(TypeScriptify)
 	result.Indent = "\t"
-	result.BackupDir = "."
+	result.BackupExtension = "backup"
 
 	types := make(map[reflect.Kind]string)
 
@@ -49,6 +50,7 @@ func New() *TypeScriptify {
 	types[reflect.Float64] = "number"
 
 	types[reflect.String] = "string"
+	types[reflect.Interface] = "any"
 
 	result.types = types
 
@@ -158,16 +160,22 @@ func (t TypeScriptify) backup(fileName string) error {
 		return err
 	}
 
-	_, backupFn := path.Split(fmt.Sprintf("%s-%s.backup", fileName, time.Now().Format("2006-01-02T15_04_05.99")))
-	if t.BackupDir != "" {
-		backupFn = path.Join(t.BackupDir, backupFn)
+	fileOut, err := os.Create(fmt.Sprintf("%s-%s.%s", fileName, time.Now().Format("2006-01-02T15_04_05.99"), t.BackupExtension))
+	if err != nil {
+		return err
+	}
+	defer fileOut.Close()
+
+	_, err = fileOut.Write(bytes)
+	if err != nil {
+		return err
 	}
 
-	return ioutil.WriteFile(backupFn, bytes, os.FileMode(0700))
+	return nil
 }
 
 func (t TypeScriptify) ConvertToFile(fileName string) error {
-	if len(t.BackupDir) > 0 {
+	if len(t.BackupExtension) > 0 {
 		err := t.backup(fileName)
 		if err != nil {
 			return err
@@ -200,13 +208,15 @@ func (t TypeScriptify) ConvertToFile(fileName string) error {
 }
 
 func (t *TypeScriptify) convertType(typeOf reflect.Type, customCode map[string]string) (string, error) {
+	//fmt.Printf("Converting type: %s\n", typeOf)
 	if _, found := t.alreadyConverted[typeOf]; found { // Already converted
 		return "", nil
 	}
+	t.alreadyConverted[typeOf] = true
 
 	entityName := fmt.Sprintf("%s%s%s", t.Prefix, t.Suffix, typeOf.Name())
 	result := fmt.Sprintf("class %s {\n", entityName)
-	if !t.DontExport {
+	if t.DoExportClass {
 		result = "export " + result
 	}
 	builder := typeScriptClassBuilder{
@@ -218,35 +228,56 @@ func (t *TypeScriptify) convertType(typeOf reflect.Type, customCode map[string]s
 	for _, field := range fields {
 		jsonTag := field.Tag.Get("json")
 		jsonFieldName := ""
+
 		if len(jsonTag) > 0 {
 			jsonTagParts := strings.Split(jsonTag, ",")
 			if len(jsonTagParts) > 0 {
 				jsonFieldName = strings.Trim(jsonTagParts[0], t.Indent)
 			}
 		}
+
 		if len(jsonFieldName) > 0 && jsonFieldName != "-" {
 			var err error
-			if field.Type.Kind() == reflect.Struct { // Struct:
+			switch field.Type.Kind() {
+			case reflect.Interface:
+				builder.AddStructField(jsonFieldName, "any")
+			case reflect.Struct:
 				typeScriptChunk, err := t.convertType(field.Type, customCode)
 				if err != nil {
 					return "", err
 				}
 				result = typeScriptChunk + "\n" + result
 				builder.AddStructField(jsonFieldName, field.Type.Name())
-			} else if field.Type.Kind() == reflect.Slice { // Slice:
+			case reflect.Ptr:
+				typeScriptChunk, err := t.convertType(field.Type.Elem(), customCode)
+				if err != nil {
+					return "", err
+				}
+				result = typeScriptChunk + "\n" + result
+				builder.AddStructField(jsonFieldName, field.Type.Elem().Name())
+			case reflect.Slice:
 				if field.Type.Elem().Kind() == reflect.Struct { // Slice of structs:
+					//fmt.Printf("Struct in Slice: %+v\n", field.Type.Elem())
 					typeScriptChunk, err := t.convertType(field.Type.Elem(), customCode)
 					if err != nil {
 						return "", err
 					}
 					result = typeScriptChunk + "\n" + result
 					builder.AddArrayOfStructsField(jsonFieldName, field.Type.Elem().Name())
+				} else if field.Type.Elem().Kind() == reflect.Ptr {
+					typeScriptChunk, err := t.convertType(field.Type.Elem().Elem(), customCode)
+					if err != nil {
+						return "", err
+					}
+					result = typeScriptChunk + "\n" + result
+					builder.AddArrayOfStructsField(jsonFieldName, field.Type.Elem().Elem().Name())
 				} else { // Slice of simple fields:
 					err = builder.AddSimpleArrayField(jsonFieldName, field.Type.Elem().Name(), field.Type.Elem().Kind())
 				}
-			} else { // Simple field:
+			default:
 				err = builder.AddSimpleField(jsonFieldName, field.Type.Name(), field.Type.Kind())
 			}
+
 			if err != nil {
 				return "", err
 			}
@@ -256,7 +287,7 @@ func (t *TypeScriptify) convertType(typeOf reflect.Type, customCode map[string]s
 	result += builder.fields
 	if t.CreateFromMethod {
 		result += fmt.Sprintf("\n%sstatic createFrom(source: any) {\n", t.Indent)
-		result += fmt.Sprintf("%s%svar result = new %s();\n", t.Indent, t.Indent, entityName)
+		result += fmt.Sprintf("%s%slet result = new %s();\n", t.Indent, t.Indent, entityName)
 		result += builder.createFromMethodBody
 		result += fmt.Sprintf("%s%sreturn result;\n", t.Indent, t.Indent)
 		result += fmt.Sprintf("%s}\n\n", t.Indent)
@@ -268,8 +299,6 @@ func (t *TypeScriptify) convertType(typeOf reflect.Type, customCode map[string]s
 	}
 
 	result += "}"
-
-	t.alreadyConverted[typeOf] = true
 
 	return result, nil
 }
@@ -289,7 +318,7 @@ func (t *typeScriptClassBuilder) AddSimpleArrayField(fieldName, fieldType string
 			return nil
 		}
 	}
-	return errors.New(fmt.Sprintf("Cannot find type for %s (%s/%s)", kind.String(), fieldName, fieldType))
+	return errors.New(fmt.Sprintf("Cannot find type for: %s (%s/%s)", kind.String(), fieldName, fieldType))
 }
 
 func (t *typeScriptClassBuilder) AddSimpleField(fieldName, fieldType string, kind reflect.Kind) error {
@@ -300,7 +329,7 @@ func (t *typeScriptClassBuilder) AddSimpleField(fieldName, fieldType string, kin
 			return nil
 		}
 	}
-	return errors.New("Cannot find type for " + fieldType)
+	return errors.New(fmt.Sprintf("Cannot find type '%s' for field '%s' ", fieldType, fieldName))
 }
 
 func (t *typeScriptClassBuilder) AddStructField(fieldName, fieldType string) {

@@ -3,15 +3,16 @@ package main
 import (
 	"flag"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"io/ioutil"
 	"os"
 	"os/exec"
 	"strings"
 	"text/template"
 	"time"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"log"
 )
 
 const TEMPLATE = `package main
@@ -25,8 +26,6 @@ import (
 
 func main() {
 	t := typescriptify.New()
-{{ range $key, $value := .InitParams }}	t.{{ $key }}={{ $value }}
-{{ end }}
 {{ range .Structs }}	t.Add({{ . }}{})
 {{ end }}
 	err := t.ConvertToFile("{{ .TargetFile }}")
@@ -40,14 +39,13 @@ type Params struct {
 	ModelsPackage string
 	TargetFile    string
 	Structs       []string
-	InitParams    map[string]interface{}
 }
 
 func main() {
-	var packagePath, target, backupDir string
+	var packagePath, target, stringExtension string
 	flag.StringVar(&packagePath, "package", "", "Path of the package with models")
 	flag.StringVar(&target, "target", "", "Target typescript file")
-	flag.StringVar(&backupDir, "backup", "", "Directory where backup files are saved")
+	flag.StringVar(&stringExtension, "extension", "", "")
 	flag.Parse()
 
 	structs := []string{}
@@ -97,15 +95,8 @@ func main() {
 		}
 	}
 
-	p := Params{
-		Structs:       structsArr,
-		ModelsPackage: packagePath,
-		TargetFile:    target,
-		InitParams: map[string]interface{}{
-			"BackupDir": fmt.Sprintf(`"%s"`, backupDir),
-		},
-	}
-	err = t.Execute(f, p)
+	params := Params{Structs: structsArr, ModelsPackage: packagePath, TargetFile: target}
+	err = t.Execute(f, params)
 	handleErr(err)
 
 	cmd := exec.Command("go", "run", filename)
@@ -156,6 +147,6 @@ func (v *AVisitor) Visit(node ast.Node) ast.Visitor {
 
 func handleErr(err error) {
 	if err != nil {
-		panic(err.Error())
+		log.Fatal(err.Error())
 	}
 }

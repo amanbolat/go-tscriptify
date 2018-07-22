@@ -1,6 +1,6 @@
 package main
 
-import "github.com/tkrajina/typescriptify-golang-structs/typescriptify"
+import "github.com/amanbolat/go-tscriptify/typescriptify"
 
 type Address struct {
 	// Used in html
@@ -25,7 +25,6 @@ func main() {
 	converter := typescriptify.New()
 	converter.CreateFromMethod = true
 	converter.Indent = "    "
-	converter.BackupDir = ""
 
 	converter.Add(Person{})
 
