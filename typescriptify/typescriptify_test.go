@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 type Address struct {
@@ -18,7 +19,7 @@ type Address struct {
 }
 
 type Dummy struct {
-	Something string `json:"something"`
+	Something     string      `json:"something"`
 	SomeInterface interface{} `json:"some_interface"`
 }
 
@@ -28,9 +29,13 @@ type HasName struct {
 
 type Person struct {
 	HasName
-	Nicknames []string  `json:"nicknames"`
-	Addresses []Address `json:"addresses"`
-	Dummy     Dummy     `json:"a"`
+	Nicknames []string          `json:"nicknames"`
+	Addresses []Address         `json:"addresses"`
+	Dummy     Dummy             `json:"a"`
+	Ptr       *Dummy            `json:"b"`
+	SlicePtr  []*Dummy          `json:"slice_ptr"`
+	Map       map[string]*Dummy `json:"map"`
+	Birthday  time.Time         `json:"birthday"`
 }
 
 func TestTypescriptifyWithTypes(t *testing.T) {
@@ -53,6 +58,10 @@ export class Person {
         nicknames: string[];
         addresses: Address[];
         a: Dummy;
+		b: Dummy;
+		slice_ptr: Dummy[];
+		map: {[key: string]: Dummy};
+		birthday: Date;
 }`
 	testConverter(t, converter, desiredResult)
 }
@@ -77,6 +86,10 @@ class Person {
         nicknames: string[];
         addresses: Address[];
         a: Dummy;
+		b: Dummy;
+		slice_ptr: Dummy[];
+		map: {[key: string]: Dummy};
+		birthday: Date;
 }`
 	testConverter(t, converter, desiredResult)
 }
@@ -102,6 +115,10 @@ export class Person {
         nicknames: string[];
         addresses: Address[];
         a: Dummy;
+		b: Dummy;
+		slice_ptr: Dummy[];
+		map: {[key: string]: Dummy};
+		birthday: Date;
 }`
 	testConverter(t, converter, desiredResult)
 }

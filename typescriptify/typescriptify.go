@@ -10,8 +10,6 @@ import (
 	"time"
 )
 
-var dateType = reflect.TypeOf(time.Now())
-
 type TypeScriptify struct {
 	Prefix           string
 	Suffix           string
@@ -22,6 +20,7 @@ type TypeScriptify struct {
 
 	golangTypes []reflect.Type
 	types       map[reflect.Kind]string
+	dateTypes	[]reflect.Type
 
 	// throwaway, used when converting
 	alreadyConverted map[reflect.Type]bool
@@ -53,6 +52,7 @@ func New() *TypeScriptify {
 	types[reflect.Interface] = "any"
 
 	result.types = types
+	result.dateTypes = []reflect.Type{reflect.TypeOf(time.Now())}
 
 	result.Indent = "    "
 	result.CreateFromMethod = true
@@ -209,6 +209,12 @@ func (t TypeScriptify) ConvertToFile(fileName string) error {
 
 func (t *TypeScriptify) convertType(typeOf reflect.Type, customCode map[string]string) (string, error) {
 	//fmt.Printf("Converting type: %s\n", typeOf)
+	for _, v := range t.dateTypes {
+		if v == typeOf {
+			return "", nil
+		}
+	}
+
 	if _, found := t.alreadyConverted[typeOf]; found { // Already converted
 		return "", nil
 	}
@@ -228,6 +234,10 @@ func (t *TypeScriptify) convertType(typeOf reflect.Type, customCode map[string]s
 	for _, field := range fields {
 		jsonTag := field.Tag.Get("json")
 		jsonFieldName := ""
+		fieldType := field.Type
+		if fieldType.Kind() == reflect.Ptr {
+			fieldType = field.Type.Elem()
+		}
 
 		if len(jsonTag) > 0 {
 			jsonTagParts := strings.Split(jsonTag, ",")
@@ -238,41 +248,68 @@ func (t *TypeScriptify) convertType(typeOf reflect.Type, customCode map[string]s
 
 		if len(jsonFieldName) > 0 && jsonFieldName != "-" {
 			var err error
-			switch field.Type.Kind() {
+			switch fieldType.Kind() {
+			case reflect.Map:
+				keyType := "string"
+				if k, ok := t.types[fieldType.Key().Kind()]; ok {
+					keyType = k
+				}
+
+				valType := "any"
+				mapValType := fieldType.Elem()
+
+				if mapValType.Kind() == reflect.Ptr {
+					mapValType = mapValType.Elem()
+				}
+				if mapValType.Kind() == reflect.Struct {
+					valType = mapValType.Name()
+
+					typeScriptChunk, err := t.convertType(mapValType, customCode)
+					if err != nil {
+						return "", err
+					}
+					result = typeScriptChunk + "\n" + result
+				}
+				if v, ok := t.types[mapValType.Kind()]; ok {
+					valType = v
+				}
+
+				builder.AddStructField(jsonFieldName, fmt.Sprintf("{[key: %s]: %s}", keyType, valType))
 			case reflect.Interface:
 				builder.AddStructField(jsonFieldName, "any")
 			case reflect.Struct:
-				typeScriptChunk, err := t.convertType(field.Type, customCode)
+				name := fieldType.Name()
+				typeScriptChunk, err := t.convertType(fieldType, customCode)
 				if err != nil {
 					return "", err
 				}
-				result = typeScriptChunk + "\n" + result
-				builder.AddStructField(jsonFieldName, field.Type.Name())
-			case reflect.Ptr:
-				typeScriptChunk, err := t.convertType(field.Type.Elem(), customCode)
-				if err != nil {
-					return "", err
+
+				for _, v := range t.dateTypes {
+					if v != fieldType {
+						continue
+					}
+
+					name = "Date"
 				}
+
 				result = typeScriptChunk + "\n" + result
-				builder.AddStructField(jsonFieldName, field.Type.Elem().Name())
+				builder.AddStructField(jsonFieldName, name)
 			case reflect.Slice:
-				if field.Type.Elem().Kind() == reflect.Struct { // Slice of structs:
-					//fmt.Printf("Struct in Slice: %+v\n", field.Type.Elem())
-					typeScriptChunk, err := t.convertType(field.Type.Elem(), customCode)
+				elemType := fieldType.Elem()
+				if elemType.Kind() == reflect.Ptr {
+					elemType = elemType.Elem()
+				}
+
+				switch elemType.Kind() {
+				case reflect.Struct:
+					typeScriptChunk, err := t.convertType(elemType, customCode)
 					if err != nil {
 						return "", err
 					}
 					result = typeScriptChunk + "\n" + result
-					builder.AddArrayOfStructsField(jsonFieldName, field.Type.Elem().Name())
-				} else if field.Type.Elem().Kind() == reflect.Ptr {
-					typeScriptChunk, err := t.convertType(field.Type.Elem().Elem(), customCode)
-					if err != nil {
-						return "", err
-					}
-					result = typeScriptChunk + "\n" + result
-					builder.AddArrayOfStructsField(jsonFieldName, field.Type.Elem().Elem().Name())
-				} else { // Slice of simple fields:
-					err = builder.AddSimpleArrayField(jsonFieldName, field.Type.Elem().Name(), field.Type.Elem().Kind())
+					builder.AddArrayOfStructsField(jsonFieldName, elemType.Name())
+				default:
+					err = builder.AddSimpleArrayField(jsonFieldName, elemType.Name(), elemType.Kind())
 				}
 			default:
 				err = builder.AddSimpleField(jsonFieldName, field.Type.Name(), field.Type.Kind())
