@@ -1,13 +1,13 @@
 package typescriptify
 
 import (
+	"bitbucket.org/amanbolat/caconsole/shipment/model"
 	"fmt"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
-	"bitbucket.org/amanbolat/caconsole/shipment/model"
 )
 
 type Address struct {
@@ -30,13 +30,29 @@ type HasName struct {
 
 type Person struct {
 	HasName
-	Nicknames []string          `json:"nicknames"`
-	Addresses []Address         `json:"addresses"`
-	Dummy     Dummy             `json:"a"`
-	Ptr       *Dummy            `json:"b"`
-	SlicePtr  []*Dummy          `json:"slice_ptr"`
-	Map       map[string]*Dummy `json:"map"`
-	Birthday  time.Time         `json:"birthday"`
+	Nicknames  []string             `json:"nicknames"`
+	Addresses  []Address            `json:"addresses"`
+	Dummy      Dummy                `json:"a"`
+	Ptr        *Dummy               `json:"b"`
+	SlicePtr   []*Dummy             `json:"slice_ptr"`
+	Map        map[string]*Dummy    `json:"map"`
+	Birthday   time.Time            `json:"birthday"`
+}
+
+type Shipment struct {
+	Statuses map[string]time.Time `json:"statuses"`
+}
+
+func TestTypeMapStringTime(t *testing.T)  {
+	converter := New()
+	converter.AddType(reflect.TypeOf(Shipment{}))
+	converter.CreateFromMethod = false
+
+	desiredResult := `export class Shipment {
+		statuses: {[key: string]: Date};
+}`
+
+	testConverter(t, converter, desiredResult)
 }
 
 func TestTypescriptifyWithTypes(t *testing.T) {
@@ -74,15 +90,15 @@ func TestTypescriptifyWithInstances(t *testing.T) {
 	converter.Add(Dummy{})
 	converter.CreateFromMethod = false
 
-	desiredResult := `class Dummy {
+	desiredResult := `export class Dummy {
         something: string;
 		some_interface: any;
 }
-class Address {
+export class Address {
         duration: number;
         text: string;
 }
-class Person {
+export class Person {
         name: string;
         nicknames: string[];
         addresses: Address[];
@@ -133,11 +149,11 @@ func TestWithPrefixes(t *testing.T) {
 	converter.Add(Dummy{})
 	converter.CreateFromMethod = false
 
-	desiredResult := `class test_Address {
+	desiredResult := `export class test_Address {
         duration: number;
         text: string;
 }
-class test_Dummy {
+export class test_Dummy {
         something: string;
 		some_interface: any;
 }`

@@ -215,16 +215,17 @@ func (t TypeScriptify) ConvertToFile(fileName string) error {
 }
 
 func (t *TypeScriptify) convertType(typeOf reflect.Type, customCode map[string]string) (string, error) {
+	if typeOf.Kind() == reflect.Interface {
+		return "", nil
+	}
+
 	for _, v := range t.dateTypes {
-		//fmt.Printf("Time is equal: %v\n", reflect.TypeOf(time.Now()) == reflect.TypeOf(null.Time{}))
-		//fmt.Printf("Type is %s\n", typeOf)
 		if v.String() == typeOf.String() {
-			//fmt.Printf("Found Time: %s %s\n", typeOf, v)
 			return "", nil
 		}
 	}
 
-	if _, found := t.alreadyConverted[typeOf]; found { // Already converted
+	if _, found := t.alreadyConverted[typeOf]; found {
 		return "", nil
 	}
 	t.alreadyConverted[typeOf] = true
@@ -291,6 +292,15 @@ func (t *TypeScriptify) convertType(typeOf reflect.Type, customCode map[string]s
 					if err != nil {
 						return "", err
 					}
+
+					for _, v := range t.dateTypes {
+						if v.String() != mapValType.String() {
+							continue
+						}
+
+						valType = "Date"
+					}
+
 					result = typeScriptChunk + "\n" + result
 				}
 				if v, ok := t.types[mapValType.Kind()]; ok {
