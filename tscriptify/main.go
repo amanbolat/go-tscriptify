@@ -136,7 +136,10 @@ func (v *AVisitor) Visit(node ast.Node) ast.Visitor {
 	if node != nil {
 		switch t := node.(type) {
 		case *ast.Ident:
-			v.structNameCandidate = t.Name
+			firstChar := string(t.Name[0])
+			if strings.ToUpper(firstChar) == firstChar {
+				v.structNameCandidate = t.Name
+			}
 		case *ast.StructType:
 			if len(v.structNameCandidate) > 0 {
 				v.structs = append(v.structs, v.structNameCandidate)
